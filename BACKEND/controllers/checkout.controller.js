@@ -6,7 +6,7 @@ import mongoose from 'mongoose';
 import Stripe from 'stripe';
 import { sendOrderConfirmationEmail } from '../services/email.service.js';
 import { processReferralOnPurchase } from '../services/referral.service.js';
-import { io } from '../server.js';
+import { getIO } from '../socket.js';
 
 let stripe;
 if (process.env.NODE_ENV === 'test') {
@@ -206,7 +206,8 @@ export const stripeWebhook = async (req, res) => {
               isDeleted: { $ne: true },
               baseStock: { $gte: item.quantity },
             },
-            { $inc: { baseStock: -item.quantity } }
+            { $inc: { baseStock: -item.quantity } },
+            { new: true }
           );
 
           if (!updated) {
@@ -216,9 +217,9 @@ export const stripeWebhook = async (req, res) => {
           }
 
           // Emit real-time stock update
-          io.emit("stockUpdate", {
+          getIO()?.emit("stockUpdate", {
             productId: item._id,
-            newStock: updated.stock - item.quantity
+            newStock: updated.baseStock
           });
 
           deductions.push({ productId: item._id, quantity: item.quantity });
