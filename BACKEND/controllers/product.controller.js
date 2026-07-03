@@ -1,15 +1,11 @@
-﻿import Product from "../models/product.model.js";
+import Product from "../models/product.model.js";
 import mongoose from "mongoose";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import cloudinary from "../config/cloudinary.js";
 import { AppError } from "../middleware/errorMiddleware.js";
-import { io } from "../server.js";
-import {
-  indexProduct,
-  deleteProductFromIndex,
-  searchProductsES,
-} from "../services/elasticsearch.service.js";
-import redis from "../config/redis.js";
+import { getIO } from "../socket.js";
+import { indexProduct, deleteProductFromIndex, searchProductsES } from '../services/elasticsearch.service.js';
+import redis from '../config/redis.js';
 
 const CACHE_TTL = 300; // seconds
 
@@ -39,16 +35,17 @@ const cloudinaryConfigured = () =>
   process.env.CLOUDINARY_API_SECRET;
 
 const uploadToCloudinary = (buffer) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: "product-store" },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-    stream.end(buffer);
-  });
+    return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+            { folder: 'product-store' },
+            (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            }
+        );
+        stream.on('error', reject);
+        stream.end(buffer);
+    });
 };
 
 const extractCloudinaryPublicId = (url) => {
@@ -330,11 +327,14 @@ export const updateProduct = async (req, res, next) => {
 
     res.status(200).json({ success: true, data: updatedProduct });
 
-    if (stock !== undefined) {
-      io.emit("stockUpdate", {
-        productId: updatedProduct._id,
-        newStock: updatedProduct.stock,
-      });
+        if (stock !== undefined) {
+            getIO()?.emit("stockUpdate", {
+                productId: updatedProduct._id,
+                newStock: updatedProduct.stock
+            });
+        }
+    } catch (error) {
+        next(error);
     }
   } catch (error) {
     next(error);
@@ -586,34 +586,34 @@ export const getProductBundle = async (req, res) => {
 
 // @desc    Search products
 export const searchProducts = async (req, res, next) => {
-  const { q } = req.query;
+    const { q, brands } = req.query;
+    const brandList = brands ? brands.split(',').map((b) => b.trim()).filter(Boolean) : [];
+    const hasQuery = !!(q && q.trim());
 
-  if (!q || !q.trim()) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Search query is required" });
-  }
+    try {
+        if (!hasQuery && brandList.length === 0) {
+            const products = await Product.find({ isDeleted: { $ne: true } });
+            return res.status(200).json({ success: true, count: products.length, data: products });
+        }
 
-  try {
-    // Try Elasticsearch first
-    const esProducts = await searchProductsES(q);
-    if (esProducts) {
-      return res.status(200).json({ success: true, data: esProducts });
+        if (hasQuery && brandList.length === 0) {
+            const esProducts = await searchProductsES(q);
+            if (esProducts) {
+                return res.status(200).json({ success: true, count: esProducts.length, data: esProducts });
+            }
+        }
+
+        const filter = { isDeleted: { $ne: true } };
+        if (hasQuery) {
+            filter.name = new RegExp(escapeRegex(q.trim()), 'i');
+        }
+        if (brandList.length > 0) {
+            filter.brand = { $in: brandList.map((b) => new RegExp(`^${escapeRegex(b)}$`, 'i')) };
+        }
+
+        const products = await Product.find(filter);
+        res.status(200).json({ success: true, count: products.length, data: products });
+    } catch (error) {
+        next(error);
     }
-
-    // Fallback to MongoDB regex search
-    const safeQuery = escapeRegex(q);
-    const regex = new RegExp(safeQuery, "i");
-    const products = await Product.find({
-      name: regex,
-      isDeleted: { $ne: true },
-    });
-
-    res.status(200).json({
-      success: true,
-      data: products,
-    });
-  } catch (error) {
-    next(error);
-  }
 };
