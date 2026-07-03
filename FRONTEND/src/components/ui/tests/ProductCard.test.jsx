@@ -103,4 +103,14 @@ describe("ProductCard", () => {
       expect(addToCartButton).toBeDisabled();
       expect(addToCartButton).toHaveTextContent("Out of Stock");
     });
+
+    it("applies correct layout properties and transition styles to the card container", () => {
+      render(<ProductCard product={mockProduct} />);
+      const card = screen.getByRole("group");
+      expect(card).toBeInTheDocument();
+      expect(card).toHaveAttribute("role", "group");
+      
+      const computedStyle = window.getComputedStyle(card);
+      expect(computedStyle.transition).toBe("all 0.2s ease-in-out");
+    });
   });
