@@ -26,7 +26,7 @@ import { stripeWebhook } from "./controllers/checkout.controller.js";
 import { expressMiddleware } from "@as-integrations/express4";
 import { apolloServer } from "./graphql/server.js";
 import { optionalProtect } from "./middleware/auth.js";
-import cartRoutes from "./routes/cart.route.js";
+import { requestIdMiddleware } from "./middleware/requestIdMiddleware.js";
 // Import error handlers
 import { notFoundHandler, errorHandler } from "./middleware/errorMiddleware.js";
 import { validateEnv } from "./config/env.js";
@@ -91,6 +91,7 @@ const cspDirectives = {
 
 const app = express();
 await apolloServer.start();
+app.use(requestIdMiddleware);
 
 // Register helmet BEFORE the routes (including /graphql) so every response —
 // API and GraphQL alike — carries the hardened security headers.
@@ -144,6 +145,12 @@ app.post("/api/checkout/webhook", express.raw({ type: 'application/json' }), str
 app.use("/api", limiter);
 
 app.use(express.json());
+
+// Health check — registered before all other routes so load balancers and
+// deployment probes always get a fast 200, unaffected by catch-all handlers.
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ success: true, status: "ok", timestamp: new Date().toISOString() });
+});
 
 // ============= API ROUTES =============
 

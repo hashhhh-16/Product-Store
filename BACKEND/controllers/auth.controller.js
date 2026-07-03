@@ -5,23 +5,15 @@ import jwt from "jsonwebtoken";
 import { sendPasswordResetEmail } from "../services/email.service.js";
 import { processReferralOnRegister } from "../services/referral.service.js";
 import { verifyTOTP } from "../services/totp.service.js";
-const generateAccessToken = (user) =>
-  jwt.sign(
-    { id: user._id },
-    process.env.JWT_SECRET,
-    { expiresIn: "15m" }
-  );
 
-const generateRefreshToken = (user) =>
-  jwt.sign(
-    { id: user._id },
-    process.env.JWT_REFRESH_SECRET,
-    { expiresIn: "7d" }
-  );
+const normalizeEmail = (email) => email?.trim().toLowerCase();
+
 export const registerUser = async (req, res) => {
   try {
     
     const { name, email, password, referralCode } = req.body;
+
+    const normalizedEmail = normalizeEmail(email);
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -30,7 +22,7 @@ export const registerUser = async (req, res) => {
       });
     }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: normalizedEmail });
 
     if (existingUser) {
       return res.status(409).json({
@@ -43,7 +35,7 @@ export const registerUser = async (req, res) => {
 
     const user = await User.create({
       name,
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
     });
 
@@ -82,8 +74,10 @@ export const loginUser = async (req, res) => {
       });
     }
 
+    const normalizedEmail = normalizeEmail(email);
+
     // twoFactorSecret is select:false, so it must be requested explicitly.
-    const user = await User.findOne({ email }).select("+twoFactorSecret");
+    const user = await User.findOne({ email: normalizedEmail }).select("+twoFactorSecret");
 
     if (!user) {
       return res.status(401).json({
@@ -238,7 +232,9 @@ export const forgotPassword = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email is required" });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    const normalizedEmail = normalizeEmail(email)
+
+    const user = await User.findOne({ email: normalizedEmail });
 
     // Artificial delay on early-return paths so response time doesn't reveal user existence
     if (!user || user.provider !== 'local') {
